@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>WA Bot — Link Device</title>
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    font-family: system-ui, -apple-system, sans-serif;
+    max-width: 420px;
+    margin: 60px auto;
+    padding: 0 20px;
+    text-align: center;
+  }
+  h1 { font-size: 1.3rem; margin-bottom: 4px; }
+  p.sub { opacity: 0.7; margin-top: 0; font-size: 0.9rem; }
+  input {
+    width: 100%;
+    padding: 12px;
+    font-size: 1rem;
+    border-radius: 8px;
+    border: 1px solid #8884;
+    box-sizing: border-box;
+    margin-top: 16px;
+  }
+  button {
+    width: 100%;
+    padding: 12px;
+    font-size: 1rem;
+    border-radius: 8px;
+    border: none;
+    background: #25D366;
+    color: #fff;
+    margin-top: 12px;
+    cursor: pointer;
+  }
+  button:disabled { opacity: 0.5; cursor: default; }
+  #code {
+    font-size: 2rem;
+    letter-spacing: 4px;
+    font-weight: 700;
+    margin-top: 24px;
+    padding: 16px;
+    border-radius: 8px;
+    background: #8882;
+    display: none;
+  }
+  #status { margin-top: 20px; font-size: 0.9rem; opacity: 0.8; }
+</style>
+</head>
+<body>
+  <h1>Link your WhatsApp</h1>
+  <p class="sub">Enter your number with country code (no + or spaces), then enter the code in WhatsApp → Linked Devices → Link with phone number.</p>
+
+  <input id="phone" type="tel" placeholder="e.g. 263771234567" />
+  <button id="pairBtn">Get pairing code</button>
+
+  <div id="code"></div>
+  <div id="status">Checking status…</div>
+
+<script>
+  const phoneInput = document.getElementById('phone');
+  const pairBtn = document.getElementById('pairBtn');
+  const codeEl = document.getElementById('code');
+  const statusEl = document.getElementById('status');
+
+  async function pair() {
+    const phoneNumber = phoneInput.value.trim();
+    if (!phoneNumber) return;
+    pairBtn.disabled = true;
+    pairBtn.textContent = 'Requesting…';
+    try {
+      const res = await fetch('/api/pair', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phoneNumber }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to get code');
+      codeEl.textContent = data.code;
+      codeEl.style.display = 'block';
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      pairBtn.disabled = false;
+      pairBtn.textContent = 'Get pairing code';
+    }
+  }
+
+  async function poll() {
+    try {
+      const res = await fetch('/api/status');
+      const data = await res.json();
+      statusEl.textContent = 'Status: ' + data.status;
+      if (data.status === 'ready') {
+        codeEl.style.display = 'none';
+        statusEl.textContent = '✅ Linked and running';
+      }
+    } catch {
+      statusEl.textContent = 'Status: unreachable';
+    }
+  }
+
+  pairBtn.addEventListener('click', pair);
+  poll();
+  setInterval(poll, 3000);
+</script>
+</body>
+</html>
