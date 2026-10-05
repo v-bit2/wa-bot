@@ -157,12 +157,18 @@ async function requestPairingCode(phoneNumber) {
   }
 
   try {
-    const code = await state.sock.requestPairingCode(cleaned);
-    if (!code) {
+    const rawCode = await state.sock.requestPairingCode(cleaned);
+    if (!rawCode) {
       throw new Error('Failed to obtain pairing code from WhatsApp.');
     }
-    state.pairingCode = code;
-    return code;
+    // Format code as XXXX-XXXX (uppercase with hyphen) as displayed in WhatsApp UI
+    const formattedCode = rawCode.toString().toUpperCase().replace(/[^A-Z0-9]/g, '');
+    const finalCode = formattedCode.length === 8
+      ? `${formattedCode.slice(0, 4)}-${formattedCode.slice(4)}`
+      : rawCode;
+
+    state.pairingCode = finalCode;
+    return finalCode;
   } catch (err) {
     console.error('[bot] requestPairingCode error:', err);
     throw new Error(err.message || 'Failed to request pairing code.');

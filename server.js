@@ -1,10 +1,11 @@
 // server.js
-// A tiny Express app: one page to enter a phone number and get a pairing
-// code, plus a status endpoint the page polls. This is the only "UI" —
-// no deploy panel, no QR scanning required.
+// A tiny HTTP server using native Node.js http module (no Express):
+// serves public/index.html + pairing API (/api/status, /api/pair, /api/logout).
 
+const http = require('http');
+const fs = require('fs');
 const path = require('path');
-const express = require('express');
+const url = require('url');
 const { requestPairingCode, logoutBot, state } = require('./baileys');
 
 // Simple in-memory rate limiting for pairing requests
@@ -36,48 +37,113 @@ function isValidPhoneNumber(phoneNumber) {
   return /^\d{7,15}$/.test(phoneNumber);
 }
 
+function sendJson(res, statusCode, data) {
+  res.writeHead(statusCode, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify(data));
+}
+
+function parseJsonBody(req) {
+  return new Promise((resolve, reject) => {
+    let body = '';
+    req.on('data', (chunk) => {
+      body += chunk.toString();
+      if (body.length > 1e6) {
+        req.destroy();
+        reject(new Error('Request payload too large'));
+      }
+    });
+    req.on('end', () => {
+      if (!body) return resolve({});
+      try {
+        resolve(JSON.parse(body));
+      } catch (err) {
+        reject(new Error('Invalid JSON payload'));
+      }
+    });
+    req.on('error', reject);
+  });
+}
+
 function createServer() {
-  const app = express();
-  app.use(express.json());
-  app.use(express.static(path.join(__dirname, 'public')));
+  const server = http.createServer(async (req, res) => {
+    const parsedUrl = url.parse(req.url, true);
+    const pathname = parsedUrl.pathname;
+    const method = req.method.toUpperCase();
 
-  app.get('/api/status', (req, res) => {
-    res.json({ status: state.status, pairingCode: state.pairingCode });
+    // CORS headers
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+    if (method === 'OPTIONS') {
+      res.writeHead(204);
+      return res.end();
+    }
+
+    // Static route: GET / or /index.html
+    if (method === 'GET' && (pathname === '/' || pathname === '/index.html')) {
+      const filePath = path.join(__dirname, 'public', 'index.html');
+      fs.readFile(filePath, (err, content) => {
+        if (err) {
+          return sendJson(res, 500, { error: 'Failed to load UI' });
+        }
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+        res.end(content);
+      });
+      return;
+    }
+
+    // API route: GET /api/status
+    if (method === 'GET' && pathname === '/api/status') {
+      return sendJson(res, 200, { status: state.status, pairingCode: state.pairingCode });
+    }
+
+    // API route: POST /api/pair
+    if (method === 'POST' && pathname === '/api/pair') {
+      const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown';
+      if (!checkPairRateLimit(clientIp)) {
+        return sendJson(res, 429, { error: 'Too many pairing requests. Please wait a few minutes before trying again.' });
+      }
+
+      let body;
+      try {
+        body = await parseJsonBody(req);
+      } catch (err) {
+        return sendJson(res, 400, { error: err.message });
+      }
+
+      const { phoneNumber } = body;
+      if (!phoneNumber) {
+        return sendJson(res, 400, { error: 'phoneNumber is required (with country code, digits only, no +)' });
+      }
+
+      if (!isValidPhoneNumber(phoneNumber)) {
+        return sendJson(res, 400, { error: 'Invalid phone number format. It must contain digits only, including country code (7 to 15 digits, no +, spaces, or special characters).' });
+      }
+
+      try {
+        const code = await requestPairingCode(phoneNumber);
+        return sendJson(res, 200, { code });
+      } catch (err) {
+        return sendJson(res, 400, { error: err.message });
+      }
+    }
+
+    // API route: POST /api/logout
+    if (method === 'POST' && pathname === '/api/logout') {
+      try {
+        await logoutBot();
+        return sendJson(res, 200, { success: true, message: 'Logged out successfully and auth state cleared.' });
+      } catch (err) {
+        return sendJson(res, 500, { error: err.message || 'Failed to logout.' });
+      }
+    }
+
+    // Fallback 404
+    sendJson(res, 404, { error: 'Not found' });
   });
 
-  app.post('/api/pair', async (req, res) => {
-    const clientIp = req.ip || req.connection.remoteAddress || 'unknown';
-    if (!checkPairRateLimit(clientIp)) {
-      return res.status(429).json({ error: 'Too many pairing requests. Please wait a few minutes before trying again.' });
-    }
-
-    const { phoneNumber } = req.body;
-    if (!phoneNumber) {
-      return res.status(400).json({ error: 'phoneNumber is required (with country code, digits only, no +)' });
-    }
-
-    if (!isValidPhoneNumber(phoneNumber)) {
-      return res.status(400).json({ error: 'Invalid phone number format. It must contain digits only, including country code (7 to 15 digits, no +, spaces, or special characters).' });
-    }
-
-    try {
-      const code = await requestPairingCode(phoneNumber);
-      res.json({ code });
-    } catch (err) {
-      res.status(400).json({ error: err.message });
-    }
-  });
-
-  app.post('/api/logout', async (req, res) => {
-    try {
-      await logoutBot();
-      res.json({ success: true, message: 'Logged out successfully and auth state cleared.' });
-    } catch (err) {
-      res.status(500).json({ error: err.message || 'Failed to logout.' });
-    }
-  });
-
-  return app;
+  return server;
 }
 
 module.exports = { createServer };
