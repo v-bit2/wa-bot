@@ -56,6 +56,7 @@
   <input id="phone" type="tel" placeholder="e.g. 263771234567" />
   <button id="pairBtn">Get pairing code</button>
 
+  <div id="error" style="color: #ff4d4d; margin-top: 16px; display: none;"></div>
   <div id="code"></div>
   <div id="status">Checking status…</div>
 
@@ -63,6 +64,7 @@
   const phoneInput = document.getElementById('phone');
   const pairBtn = document.getElementById('pairBtn');
   const codeEl = document.getElementById('code');
+  const errorEl = document.getElementById('error');
   const statusEl = document.getElementById('status');
 
   async function pair() {
@@ -70,6 +72,8 @@
     if (!phoneNumber) return;
     pairBtn.disabled = true;
     pairBtn.textContent = 'Requesting…';
+    errorEl.style.display = 'none';
+    codeEl.style.display = 'none';
     try {
       const res = await fetch('/api/pair', {
         method: 'POST',
@@ -81,7 +85,8 @@
       codeEl.textContent = data.code;
       codeEl.style.display = 'block';
     } catch (err) {
-      alert(err.message);
+      errorEl.textContent = err.message;
+      errorEl.style.display = 'block';
     } finally {
       pairBtn.disabled = false;
       pairBtn.textContent = 'Get pairing code';

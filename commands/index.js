@@ -17,7 +17,13 @@ function loadCommands() {
       console.warn(`[commands] skipping ${file}: missing "name" or "execute"`);
       continue;
     }
-    commands.set(command.name, command);
+
+    const name = command.name.toLowerCase();
+    if (commands.has(name)) {
+      throw new Error(`Duplicate command name "${command.name}" defined in ${file}. Command names must be unique.`);
+    }
+
+    commands.set(name, command);
   }
 
   return commands;
